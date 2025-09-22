@@ -1,0 +1,71 @@
+.controller-container {
+    font-family: Arial, sans-serif;
+    padding: 20px;
+    max-width: 600px;
+    margin: auto;
+    background: #f9f9f9;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.controller-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 2px solid #ddd;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+}
+
+.header-icon {
+    font-size: 30px;
+    color: #007bff;
+}
+
+.status-section {
+    margin-bottom: 20px;
+}
+
+.status-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.status-icon {
+    font-size: 20px;
+    color: #28a745;
+}
+
+.controls-section {
+    margin-bottom: 20px;
+}
+
+.speed-control {
+    margin-bottom: 20px;
+}
+
+.control-button {
+    font-size: 18px;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.start-button {
+    background-color: #28a745;
+    color: #fff;
+}
+
+.stop-button {
+    background-color: #dc3545;
+    color: #fff;
+}
+
+.telemetry-section {
+    background: #e9ecef;
+    padding: 15px;
+    border-radius: 5px;
+}
