@@ -1,6 +1,3 @@
-Got it ✅ Thanks for the details! Based on what you shared, I’ll create a **professional README.md** for your project **RealTime\_Video\_Streaming\_and\_RC\_Remote\_Over\_the\_Internet**. It will include an overview, features, architecture explanation, and installation/run instructions.
-
-Here’s a first version you can refine further as your project evolves:
 
 ---
 
