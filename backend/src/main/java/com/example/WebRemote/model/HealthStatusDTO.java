@@ -8,7 +8,18 @@ public class HealthStatusDTO {
     private long upTime;            // seconds or ms (your choice)
     private String containerStatus; // RUNNING / STOPPED / ERROR
 
-    public HealthStatusDTO() {}
+    public long getLastMessageTime() {
+        return lastMessageTime;
+    }
+
+    public void setLastMessageTime(long lastMessageTime) {
+        this.lastMessageTime = lastMessageTime;
+    }
+
+    private long lastMessageTime;
+
+    public HealthStatusDTO() {
+    }
 
     public boolean isConnected() {
         return connected;

@@ -1,5 +1,8 @@
 package com.example.WebRemote.Component;
 
+import org.eclipse.paho.client.mqttv3.MqttClient;
+import org.eclipse.paho.client.mqttv3.MqttMessage;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.TextMessage;
@@ -20,6 +23,10 @@ public class WebSocketHandler extends AbstractWebSocketHandler {
     private final Map<String, String> sessionRoles = new ConcurrentHashMap<>(); // sessionId -> role
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @Autowired
+    private MqttClient mqttClient;  // Injected bean
+
+
     public void broadcastData(byte[] data) {
         for (WebSocketSession session : sessions) {
             if (session.isOpen()) {
@@ -37,36 +44,32 @@ public class WebSocketHandler extends AbstractWebSocketHandler {
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         String payload = message.getPayload();
-//        System.out.println("Received text message from session: " + session.getId());
+        System.out.println("Received from frontend: " + payload);
 
         try {
+            // Optional: Validate or extract specific data
             Map<String, Object> data = objectMapper.readValue(payload, Map.class);
 
-            // Handle role identification (signaling)
-            if (data.containsKey("role")) {
-                String role = (String) data.get("role");
-                sessionRoles.put(session.getId(), role);
-//                System.out.println("Session " + session.getId() + " registered as: " + role);
-                return;
-            }
+            // Convert back to JSON string (or customize as needed)
+            String jsonPayload = objectMapper.writeValueAsString(data);
 
-            // Relay signaling messages based on role
-            String senderRole = sessionRoles.get(session.getId());
-            if (senderRole != null) {
-                for (WebSocketSession otherSession : sessions) {
-                    if (otherSession != session && otherSession.isOpen()) {
-                        String otherRole = sessionRoles.get(otherSession.getId());
-                        // Only send to opposite role (pi <-> browser)
-                        if (otherRole != null && !otherRole.equals(senderRole)) {
-//                            System.out.println("Relaying text from " + senderRole + " to " + otherRole);
-                            otherSession.sendMessage(new TextMessage(payload));
-                        }
-                    }
-                }
-            }
+            // Publish to MQTT topic
+            MqttMessage mqttMessage = new MqttMessage(jsonPayload.getBytes());
+            mqttMessage.setQos(1);  // At least once delivery
+            mqttMessage.setRetained(false);  // Set true if you want last known value retained
+
+            mqttClient.publish("/perceptron/config", mqttMessage);
+
+            System.out.println("Published to MQTT topic /perceptron/config: " + jsonPayload);
+
+            // Optional: Send confirmation back to frontend
+            session.sendMessage(new TextMessage("Config sent to Jetson successfully"));
 
         } catch (Exception e) {
-            System.err.println("Error processing text message: " + e.getMessage());
+            System.err.println("Error forwarding to MQTT: " + e.getMessage());
+            e.printStackTrace();
+            // Optional: Send error back to frontend
+            session.sendMessage(new TextMessage("Failed to send config: " + e.getMessage()));
         }
     }
 
