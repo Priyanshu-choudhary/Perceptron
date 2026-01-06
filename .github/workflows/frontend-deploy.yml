@@ -40,7 +40,7 @@ jobs:
           script: |
             cd /home/ec2-user/RealTime_Video_Streaming_and_RC_Remote_Over_the_Internet
             git pull origin master
-            cd frontend-Remix
+            cd frontend-Remix/WebController
             npm install
             npm run build
             sudo systemctl restart frontend
