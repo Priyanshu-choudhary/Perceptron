@@ -1,227 +1,176 @@
 import cv2
-import gi
 import numpy as np
-import time 
-import tensorrt as trt 
+import time
 import math
-import pycuda.autoinit
-from Model_unet import TensorRTUnetSegmentor
 
-# --- GStreamer Setup ---
-gi.require_version('Gst', '1.0')
-from gi.repository import Gst, GLib
-
-# --- Initialization ---
-Gst.init(None)
-
-# Your frame dimensions
+# -------- constants (safe at import) --------
 WIDTH, HEIGHT = 1280, 720
 FPS = 30
-FRAME_RATE_NUMERATOR = 1 
 
-# Global variables for timestamping
-CURRENT_PTS = 0
-FRAME_DURATION = int(Gst.SECOND / FPS)
-
-
-# TensorRT Model Configuration (Passed to Segmentor)
 ENGINE_FILE_PATH = "unet_mobilenetv2_Marbel.engine"
-MODEL_INPUT_H = 384  
-MODEL_INPUT_W = 384  
-
-CAM=0
+MODEL_INPUT_H = 384
+MODEL_INPUT_W = 384
+CAM = 0
+USE_OVERLAY = True 
 
 AWS_RTSP_URL = "rtsp://yadiec2.freedynamicdns.net:8554/cam2"
 
-# LAN pipeline  
-# PIPELINE_STR = (
-#     "appsrc name=mysource is-live=true format=3 caps=video/x-raw,format=BGR,width={width},height={height},framerate={fps_num}/1 ! "
-#     "videoconvert ! "
-#     "video/x-raw,format=I420 ! "
-#     "nvvidconv ! video/x-raw(memory:NVMM), format=NV12 ! "
-#     "nvv4l2h265enc bitrate=500000 control-rate=1 preset-level=1 insert-sps-pps=true ! "
-#     "h265parse ! rtph265pay pt=96 config-interval=1 ! "
-#     "udpsink host=10.11.253.113 port=5000"
-# ).format(width=WIDTH, height=HEIGHT, fps_num=FPS)
-
-
-# AWS MediaMTX pipeline with cheap webcam.
-#PIPELINE_STR = (
-#    "appsrc name=mysource is-live=true format=3 caps=video/x-raw,format=BGR,width={width},height={height},framerate={fps_num}/1 ! "
-#    "videoconvert ! "
-#    "video/x-raw,format=I420 ! "
-#    "nvvidconv ! "
-#    "video/x-raw(memory:NVMM),format=NV12 ! "
-#    "nvv4l2h264enc bitrate=200000 control-rate=1 preset-level=1 insert-sps-pps=true maxperf-enable=1 ! "
-#    "h264parse ! "
-#    "rtspclientsink location={location} protocols=tcp do-rtsp-keep-alive=true"
-#).format(width=WIDTH, height=HEIGHT, fps_num=FPS, location=AWS_RTSP_URL)
-
-# AWS MediaMTX pipeline with DJI webcam.
 PIPELINE_STR = (
     "appsrc name=mysource is-live=true format=3 "
-    "caps=video/x-raw,format=BGR,width={width},height={height},framerate={fps_num}/1 ! "
-    "videoconvert ! "
-    "video/x-raw,format=I420 ! "
-    "nvvidconv ! "
-    "video/x-raw(memory:NVMM),format=NV12 ! "
+    "caps=video/x-raw,format=BGR,width=1280,height=720,framerate=30/1 ! "
+    "videoconvert ! video/x-raw,format=I420 ! "
+    "nvvidconv ! video/x-raw(memory:NVMM),format=NV12 ! "
     "nvv4l2h264enc bitrate=800000 control-rate=1 preset-level=1 "
     "insert-sps-pps=true maxperf-enable=1 ! "
     "h264parse ! "
-    "rtspclientsink location={location} protocols=tcp do-rtsp-keep-alive=true"
-).format(width=WIDTH,height=HEIGHT,fps_num=FPS, location=AWS_RTSP_URL)
+    "rtspclientsink location=rtsp://yadiec2.freedynamicdns.net:8554/cam2 "
+    "protocols=tcp do-rtsp-keep-alive=true"
+)
 
-pipeline = Gst.parse_launch(PIPELINE_STR)
-appsrc = pipeline.get_by_name('mysource')
-
-# --- Helper Function to Push Frames ---
 FRAME_DURATION = int(1e9 / FPS)
-def push_frame(frame):
-    global CURRENT_PTS
-    
-    frame = np.ascontiguousarray(frame)
-    data = frame.tobytes()
-    buffer = Gst.Buffer.new_wrapped(data)
-    
-    # Timing is critical for RTSP stability
-    buffer.duration = FRAME_DURATION
-    buffer.pts = CURRENT_PTS
-    buffer.dts = CURRENT_PTS 
-    
-    # Increment by duration in nanoseconds
-    CURRENT_PTS += FRAME_DURATION
-    
-    appsrc.emit('push-buffer', buffer)
-    return Gst.FlowReturn.OK
 
 
-def line_angle(p1, p2, q1, q2):
-    """Angle (deg) between line p1->p2 and q1->q2 in 2D."""
-    v1 = np.array([p2[0] - p1[0], p2[1] - p1[1]], dtype=float)
-    v2 = np.array([q2[0] - q1[0], q2[1] - q1[1]], dtype=float)
 
-    dot = v1 @ v2
-    det = v1[0] * v2[1] - v1[1] * v2[0]  # 2D "cross"
-    angle_rad = np.arctan2(abs(det), dot)
-    return np.degrees(angle_rad)
-# --- Main Execution ---
-def process_camera_stream():
+
+def calculate_steering_error(center_bottom, target_point):
+    """
+    Calculates the angle between the car's center-forward axis 
+    and the detected path point.
+    """
+    # Vector from car bottom-center to a point on the path
+    dx = target_point[0] - center_bottom[0]
+    dy = target_point[1] - center_bottom[1] # dy will be negative because y decreases upward
     
-    # 1. Initialize Segmentor - Pass all necessary configuration constants
-    try:
-        segmentor = TensorRTUnetSegmentor(
-            ENGINE_FILE_PATH, 
-            MODEL_INPUT_H, 
-            MODEL_INPUT_W, 
-            WIDTH, 
-            HEIGHT
-        )
-    except Exception as e:
-        print(f"FATAL ERROR: Could not initialize TensorRT Segmentor. Ensure '{ENGINE_FILE_PATH}' exists and pycuda/tensorrt are installed.")
-        print(f"Details: {e}")
-        return
+    # Calculate angle in radians. 
+    # We use -dy because in image coordinates, 'up' is negative Y.
+    # This aligns 0 degrees with "straight up"
+    angle_rad = math.atan2(dx, -dy) 
+    
+    return math.degrees(angle_rad)
 
-    # 2. Start GStreamer Pipeline
+
+
+
+def process_camera_stream(shared_angle, shared_seq):
+    # -------- IMPORT GPU + GST HERE (child-only) --------
+    import gi
+    gi.require_version('Gst', '1.0')
+    from gi.repository import Gst
+
+    import pycuda.driver as cuda
+    cuda.init()
+
+    from Model_unet import TensorRTUnetSegmentor
+
+    Gst.init(None)
+
+    pipeline = Gst.parse_launch(PIPELINE_STR)
+    appsrc = pipeline.get_by_name("mysource")
     pipeline.set_state(Gst.State.PLAYING)
-    print("GStreamer pipeline is running. Pushing frames...")
 
-    # 3. Open Camera
-    cap = cv2.VideoCapture(f'/dev/video{CAM}', cv2.CAP_V4L2)
-    
-    if not cap.isOpened():
-        print("FATAL ERROR: Camera device is not opening. Check permissions/device name.")
-        exit(1)
-        
+    segmentor = TensorRTUnetSegmentor(
+        ENGINE_FILE_PATH,
+        MODEL_INPUT_H,
+        MODEL_INPUT_W,
+        WIDTH,
+        HEIGHT
+    )
+
+    cap = cv2.VideoCapture(f"/dev/video{CAM}", cv2.CAP_V4L2)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
-    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')) 
-    
-    # Wait for camera to stabilize (Added back in)
-    print("Camera initialized. Waiting 0.3 seconds for hardware to stabilize...")
+
     time.sleep(0.3)
-    
-    try:
-        # Main loop to grab, process, and stream
-        while True:
-            ret, frame = cap.read()
-            
-            if not ret:
-                print("ERROR: Failed to read frame from camera. Exiting loop.")
-                break
-                
-            # --- 4. Segmentation Inference ---
-            mask_np = segmentor.infer(frame)
-           
-           
-            
-            # Create a 3-channel colored mask (e.g., magenta)
+
+    pts = 0
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # ---------- 1. Inference (ALWAYS runs) ----------
+        mask = segmentor.infer(frame)
+
+        # ---------- 2. Path computation ----------
+        center_points = []
+        for y in range(0, mask.shape[0], 50):
+            idx = np.where(mask[y] == 255)[0]
+            if len(idx):
+                center_points.append(((idx[0] + idx[-1]) // 2, y))
+
+        if len(center_points) < 2:
+            continue
+
+        
+        
+        # Define the car's bottom center
+        car_center_x = WIDTH // 2
+        car_bottom_y = HEIGHT - 1
+        center = (car_center_x, car_bottom_y )
+        vp_y = int(HEIGHT * 0.6)
+        
+        # Pick a target point from the detected line (e.g., the second point found)
+        # Choosing a point higher up (e.g., center_points[2]) gives the PID 
+        # a "look-ahead" distance which makes the car more stable at speed.
+        target_p = center_points[1] 
+
+        # Calculate error: Positive = Right, Negative = Left
+        angle = calculate_steering_error((car_center_x, car_bottom_y), target_p)
+
+        # Publish the signed angle
+        shared_angle.value = float(angle)
+        shared_seq.value += 1
+
+
+        # ---------- 4. Choose frame to stream ----------
+        if USE_OVERLAY:
+            # ---- overlay mask ----
             color_mask = np.zeros_like(frame, dtype=np.uint8)
-            color_mask[mask_np > 0] = [255, 255, 255] # white for the segmented area (BGR)
-            
-            # --- 5. Overlay Mask onto Frame ---
-            alpha = 0.5
-            output_frame = cv2.addWeighted(frame, 1.0, color_mask, alpha, 0)
-            
-            # --- 6. Optional: Draw a line on the final output (Your original drawing) ---
+            color_mask[mask > 0] = (255, 255, 255)
+            output = cv2.addWeighted(frame, 1.0, color_mask, 0.5, 0)
+
+            # ---- draw guide lines ----
             vp_x = WIDTH // 2
-            vp_y = int(HEIGHT * 0.6)
             left_bottom  = (int(WIDTH * 0.2), HEIGHT - 10)
             right_bottom = (int(WIDTH * 0.8), HEIGHT - 10)
-            cv2.line(output_frame, left_bottom, (vp_x, vp_y), (0, 255, 0), 2)
-            cv2.line(output_frame, right_bottom, (vp_x, vp_y), (0, 255, 0), 2)
-            cv2.line(output_frame, (WIDTH//2, vp_y+50), (WIDTH//2, HEIGHT - 10), (0, 255, 255), 1)
-            
-            # --- 7 darw path ---
-            center_points = []
 
-            # Horizontal lines every 50px ONLY in white region
-            for y in range(0, mask_np.shape[0], 50):
-                row = mask_np[y, :]
-                white_indices = np.where(row == 255)[0]
+            cv2.line(output, left_bottom, (vp_x, vp_y), (0, 255, 0), 2)
+            cv2.line(output, right_bottom, (vp_x, vp_y), (0, 255, 0), 2)
+            cv2.line(output, (vp_x, vp_y + 50), (vp_x, HEIGHT - 10), (0, 255, 255), 1)
 
-                if len(white_indices) > 0:
-                    x1 = white_indices[0]
-                    x2 = white_indices[-1]
+            # ---- draw center points ----
+            for p in center_points:
+                cv2.circle(output, p, 4, (255, 0, 0), -1)
 
-                    cv2.line(output_frame, (x1, y), (x2, y), (0, 255, 0), 1)
+            # ---- draw predicted path ----
+            cv2.line(output, center, center_points[1], (0, 0, 0), 2)
 
-                    x_center = (x1 + x2) // 2     # integer center
-                    y_center = y                  # row number
+            # ---- draw angle text ----
+            cv2.putText(
+                output,
+                f"{angle:.1f} deg",
+                (100, 100),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.9,
+                (0, 0, 255),
+                2
+            )
 
-                    cv2.circle(output_frame, (x_center, y_center), 4, (255, 0, 0), -1)
+            frame_to_push = output
 
+        else:
+            # ---- raw camera feed ----
+            frame_to_push = frame
 
+        # ---------- 5. Push to GStreamer ----------
+        frame_to_push = np.ascontiguousarray(frame_to_push)
+        buf = Gst.Buffer.new_wrapped(frame_to_push.tobytes())
+        buf.pts = pts
+        buf.duration = FRAME_DURATION
+        pts += FRAME_DURATION
+        appsrc.emit("push-buffer", buf)
 
-                    center_points.append((x_center, y_center))
-
-            center  = (WIDTH // 2, HEIGHT - 1)
-
-            #This is our predicted Path line
-            cv2.line(output_frame,center,center_points[1],(0, 0, 0), 2)
-            angle = line_angle(center, center_points[1], (WIDTH // 2,  vp_y), (WIDTH // 2, HEIGHT - 10))-180
-            # print(angle)
-            # Draw angle text
-            cv2.putText(output_frame, f"{angle:.1f} deg",
-                        (100, 100),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.9,
-                        (0, 0, 255),
-                        2)
-            # --- 7. Push the processed frame ---
-            push_frame(output_frame)
-            
-            yield angle 
-            # Exit key check
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-    
-    finally:
-        # Cleanup
-        print("Stopping pipeline.")
-        appsrc.emit("end-of-stream")
-        pipeline.set_state(Gst.State.NULL)
-        cap.release()
-        cv2.destroyAllWindows()
-
-if __name__ == '__main__':
-    process_camera_stream()
+    appsrc.emit("end-of-stream")
+    pipeline.set_state(Gst.State.NULL)
+    cap.release()

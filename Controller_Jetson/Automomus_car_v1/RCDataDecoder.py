@@ -2,7 +2,7 @@
 import asyncio
 import websockets
 import struct
-from tinytlvx import TinyTLVRx, TTP_FRAME_TYPE_RC
+from tinytlvx import TinyTLVRx, TTP_FRAME_TYPE_RC ,TTP_FRAME_TYPE_CONFIG
 from typing import Dict, Optional
 import time
 
@@ -31,27 +31,52 @@ class RCDataDecoder:
         return self.latest_data
 
     def decode_rc_data(self) -> Dict[str, int]:
-        if self.rx.getType() != TTP_FRAME_TYPE_RC:
-            return {}
-
+        frame_type = self.rx.getType()
         decoded_values = {}
-        self.rx.beginTLV()
-        
-        while True:
-            tlv = self.rx.nextTLV()
-            if tlv is None:
-                break
-            ch_id, length, data = tlv
 
-            if ch_id == 100 and length == 4:
-                decoded_values["timestamp"] = struct.unpack('<I', data)[0]
+        # 1. Handle CONFIG frames
+        if frame_type == TTP_FRAME_TYPE_CONFIG:
+            self.rx.beginTLV()
+            while True:
+                tlv = self.rx.nextTLV()
+                if tlv is None:
+                    break
+                
+                ch_id, length, data = tlv
+                if length == 2:
+                    value = struct.unpack('<H', data)[0]
+                    ch_name = RC_CHANNELS.get(ch_id, f"Config_Ch_{ch_id}")
+                    decoded_values[ch_name] = value
             
-            elif length == 2:
-                value = struct.unpack('<H', data)[0]
-                ch_name = RC_CHANNELS.get(ch_id, f"Channel_{ch_id}")
-                decoded_values[ch_name] = value
+            # Add a flag so you know this was a config update
+            decoded_values["_frame_type"] = "CONFIG"
+            print(f"⚙️ Config Updated: {decoded_values}")
+            return decoded_values
 
-        return decoded_values
+        # 2. Handle RC DATA frames
+        elif frame_type == TTP_FRAME_TYPE_RC:
+            self.rx.beginTLV()
+            while True:
+                tlv = self.rx.nextTLV()
+                if tlv is None:
+                    break
+                
+                ch_id, length, data = tlv
+
+                # Handle Timestamp
+                if ch_id == 100 and length == 4:
+                    decoded_values["timestamp"] = struct.unpack('<I', data)[0]
+                
+                # Handle standard RC Channels
+                elif length == 2:
+                    value = struct.unpack('<H', data)[0]
+                    ch_name = RC_CHANNELS.get(ch_id, f"Channel_{ch_id}")
+                    decoded_values[ch_name] = value
+            
+            return decoded_values
+
+        # 3. Handle unknown frames
+        return {}
 
     # --- Inside RCDataDecoder.py ---
 

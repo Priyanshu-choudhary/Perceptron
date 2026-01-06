@@ -6,14 +6,19 @@ from serialSender import SerialSender
 from RCDataDecoder import RCDataDecoder
 from rc_mixer import RCMixer
 from health_monitor import HealthMonitor
+from control_process import PID
 
 # Configuration
 WS_URI = "ws://yadiec2.freedynamicdns.net:8080/ws"
 HEALTH_URL = "http://yadiec2.freedynamicdns.net:8080/health"
 SERIAL_PORT = "/dev/ttyUSB0"
 BAUD_RATE = 115200
+MODE = "MANUAL"
 
-async def main():
+AUTO_MODE_TRIGGER = 1700    # If Aux1 > 1700, switch to AUTO
+
+
+async def main(shared_angle, shared_seq):
     motor_serial = SerialSender(port=SERIAL_PORT, baudrate=BAUD_RATE)
     if not motor_serial.open_serial():
         print("❌ Failed to open serial port. Exiting.")
@@ -23,64 +28,68 @@ async def main():
     client = RCDataDecoder(ws_uri=WS_URI)
     asyncio.ensure_future(client.run_receiver())
 
-    # --- Timing Variables ---
+    # Initialize the PID Controller once
+    # pid = SteeringPID(kp=1.2, ki=0.01, kd=0.05)
+    steering_pid = PID(kp=5, ki=0.1, kd=0.1, setpoint=0)
     last_processed_timestamp = -1
     last_valid_packet_local_time = time.time()
+    clock_offset = None
     latency = 0
-    clock_offset = None  # To handle unsynced clocks
 
-    print("🚀 Motor Control System Started.")
+    print("🚀 Motor Control System Started. Waiting for data...")
 
     try:
         while True:
-            await asyncio.sleep(0.05) # 20Hz
+            await asyncio.sleep(0.02) # Run at 50Hz for smoother PID
             
-            current_local_ms = int(time.time() * 1000) & 0xFFFFFFFF
             data = client.get_latest_data()
-            packet_timestamp = data.get("timestamp", 0) if data else None
+            current_local_ms = int(time.time() * 1000) & 0xFFFFFFFF
             
-            # 1. Check if we have a NEW packet
-            if data and packet_timestamp != last_processed_timestamp:
+            # --- RC DATA HANDLING ---
+            if data and data.get("timestamp") != last_processed_timestamp:
+                packet_ts = data.get("timestamp")
+                raw_diff = (current_local_ms - packet_ts) & 0xFFFFFFFF
                 
-                # Calculate raw difference
-                raw_diff = (current_local_ms - packet_timestamp) & 0xFFFFFFFF
-                
-                # Initialize clock offset on the first packet
-                # This treats the first packet as having ~30ms latency base
-                if clock_offset is None:
-                    clock_offset = raw_diff - 30
-                    print(f"✅ Sync established. Clock Offset: {clock_offset}")
-
-                # Calculate relative latency
+                if clock_offset is None: clock_offset = raw_diff - 30
                 latency = (raw_diff - clock_offset) & 0xFFFFFFFF
                 
-                # Sanity check: if latency is huge, it's a wrap-around or glitch
-                if latency > 0x7FFFFFFF: latency = 0 
-
                 last_valid_packet_local_time = time.time()
-                last_processed_timestamp = packet_timestamp
+                last_processed_timestamp = packet_ts
 
-                # 2. Logic: Only process if latency is under 1 second
-                if latency < 1000:
-                    throttle = data.get("Pitch", 1500)
-                    roll     = data.get("Roll", 1500)
-                    aux1     = data.get("Aux1", 1500)
-                    direction, pwm1, pwm2 = RCMixer.compute_motor_commands(throttle, roll, aux1)
-                    motor_serial.send_motor_command(direction, pwm1, pwm2)
-                else:
-                    motor_serial.stop()
+            # --- MODE SELECTION & EXECUTION ---
+            # We check the local RC data to see if the user wants Manual or Auto
+            # Usually, we use a switch like Aux1
             
+            aux1 = data.get("Aux1", 1000) if data else 1000
+            # print(aux1)
+            if aux1 < AUTO_MODE_TRIGGER:
+                # --- MANUAL MODE ---
+                throttle = data.get("Pitch", 1500) if data else 1500
+                roll = data.get("Roll", 1500) if data else 1500
             else:
-                # 3. No new data: Check how long since the last packet arrived
-                ms_since_last = (time.time() - last_valid_packet_local_time) * 1000
-                
-                if ms_since_last > 1000:
-                    latency = 0 # As per your request: no latency if no continuous data
-                    motor_serial.stop()
+                # --- AUTO (PID) MODE ---
+                # Read from shared memory updated by Vision Process
+                current_error = shared_angle.value
 
-            # 4. Update Health Monitor
-            # last_valid_packet_local_time is passed as a 32-bit MS timestamp
-            # ms_since_last = int((time.time() - last_valid_packet_local_time) * 1000)
+                # Compute PID correction (Steering)
+                correction = steering_pid.compute(current_error)
+                # print(current_error)
+                # IMPROVEMENT: Use the remote throttle (Pitch) from the websocket
+                # If data is None, we default to 1500 (neutral/stop)
+                throttle = data.get("Pitch", 1500) if data else 1500
+
+                # Apply PID to roll (steering)
+                roll = 1500 + correction
+            
+            # --- SAFETY & MIXING ---
+            # If we haven't seen web data in 1 second, safety stop
+            if (time.time() - last_valid_packet_local_time) > 1.0:
+                motor_serial.stop()
+            else:
+                # Mix throttle/roll into motor commands
+                direction, pwm1, pwm2 = RCMixer.compute_motor_commands(throttle, roll, aux1)
+                motor_serial.send_motor_command(direction, pwm1, pwm2)
+
             health.update(int(latency), int(last_valid_packet_local_time * 1000))
 
     except KeyboardInterrupt:
@@ -89,11 +98,14 @@ async def main():
         await health.close()
         motor_serial.close_serial()
 
-if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
+def run_main(shared_angle, shared_seq):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        loop.run_until_complete(main())
-    except KeyboardInterrupt:
-        pass
+        loop.run_until_complete(main(shared_angle, shared_seq))
     finally:
         loop.close()
+
+
+if __name__ == "__main__":
+    run_main()
