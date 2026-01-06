@@ -44,32 +44,75 @@ public class WebSocketHandler extends AbstractWebSocketHandler {
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         String payload = message.getPayload();
-        System.out.println("Received from frontend: " + payload);
+        boolean isMqttMessage = false;
 
         try {
-            // Optional: Validate or extract specific data
-            Map<String, Object> data = objectMapper.readValue(payload, Map.class);
+            // Parse JSON to check for the MQTT type
+            com.fasterxml.jackson.databind.JsonNode rootNode = objectMapper.readTree(payload);
 
-            // Convert back to JSON string (or customize as needed)
-            String jsonPayload = objectMapper.writeValueAsString(data);
+            if (rootNode.has("type") && "MQTT".equals(rootNode.get("type").asText())) {
+                isMqttMessage = true;
 
-            // Publish to MQTT topic
-            MqttMessage mqttMessage = new MqttMessage(jsonPayload.getBytes());
-            mqttMessage.setQos(1);  // At least once delivery
-            mqttMessage.setRetained(false);  // Set true if you want last known value retained
+                // 1. FORWARD TO MQTT
+                MqttMessage mqttMessage = new MqttMessage(payload.getBytes());
+                mqttMessage.setQos(1);
+                mqttClient.publish("/perceptron/config", mqttMessage);
+                System.out.println("MQTT message forwarded.");
 
-            mqttClient.publish("/perceptron/config", mqttMessage);
-
-            System.out.println("Published to MQTT topic /perceptron/config: " + jsonPayload);
-
-            // Optional: Send confirmation back to frontend
-            session.sendMessage(new TextMessage("Config sent to Jetson successfully"));
-
+                // Note: We do NOT send a "Success" message back to avoid unwanted traffic
+            }
         } catch (Exception e) {
-            System.err.println("Error forwarding to MQTT: " + e.getMessage());
-            e.printStackTrace();
-            // Optional: Send error back to frontend
-            session.sendMessage(new TextMessage("Failed to send config: " + e.getMessage()));
+            // Not a JSON or doesn't have "type", so it's a normal text message
+            isMqttMessage = false;
+        }
+
+        // 2. BROADCAST TO OTHERS (Only if NOT an MQTT message)
+        if (!isMqttMessage) {
+            String senderId = session.getId();
+            String senderRole = sessionRoles.get(senderId);
+
+            for (WebSocketSession s : sessions) {
+                // CRITICAL: Check s.getId() is NOT the senderId
+                if (s.isOpen() && !s.getId().equals(senderId)) {
+
+                    String targetRole = sessionRoles.get(s.getId());
+
+                    // Optional: Your role-based filtering
+                    if (senderRole != null && targetRole != null) {
+                        if (!senderRole.equals(targetRole)) {
+                            s.sendMessage(message);
+                        }
+                    } else {
+                        // Default broadcast to everyone else
+                        s.sendMessage(message);
+                    }
+                }
+            }
+        }
+    }
+
+    // Helper method to broadcast text messages (mirrors your binary logic)
+    private void broadcastTextMessage(WebSocketSession sender, TextMessage message) {
+        String senderRole = sessionRoles.get(sender.getId());
+
+        for (WebSocketSession s : sessions) {
+            // Don't send back to the sender
+            if (s.isOpen() && !s.getId().equals(sender.getId())) {
+                try {
+                    String targetRole = sessionRoles.get(s.getId());
+                    // Apply your role filtering if roles are set
+                    if (senderRole != null && targetRole != null) {
+                        if (!senderRole.equals(targetRole)) {
+                            s.sendMessage(message);
+                        }
+                    } else {
+                        // Fallback: broadcast to everyone else if no roles are defined
+                        s.sendMessage(message);
+                    }
+                } catch (IOException e) {
+                    System.err.println("Error broadcasting text to " + s.getId() + ": " + e.getMessage());
+                }
+            }
         }
     }
 
