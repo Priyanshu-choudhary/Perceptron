@@ -48,16 +48,34 @@ export default function ControllerDashboard() {
       const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
       let msgStr = "";
 
-      if (typeof lastMessage === 'string') {
+      if (typeof lastMessage === "string") {
         msgStr = lastMessage;
-      } else if (typeof lastMessage === 'object') {
+
+        setLogs(prev => {
+          const newLogs = [...prev, { time, msg: msgStr, source: 'RX' as const }];
+          return newLogs.slice(-20); // Keep last 20
+        });
+
+      } else if (
+        lastMessage instanceof ArrayBuffer ||
+        lastMessage instanceof Blob ||
+        ArrayBuffer.isView(lastMessage) || // Uint8Array, Int16Array, etc
+        (typeof Buffer !== "undefined" && Buffer.isBuffer(lastMessage))
+      ) {
+        // PURE binary
+        console.log("binary msg");
+
+      } else if (typeof lastMessage === "object") {
         msgStr = JSON.stringify(lastMessage);
+
+        setLogs(prev => {
+          const newLogs = [...prev, { time, msg: msgStr, source: 'RX' as const }];
+          return newLogs.slice(-20); // Keep last 20
+        });
       }
 
-      setLogs(prev => {
-        const newLogs = [...prev, { time, msg: msgStr, source: 'RX' as const }];
-        return newLogs.slice(-20); // Keep last 20
-      });
+
+
     }
   }, [lastMessage]);
 
@@ -93,7 +111,7 @@ export default function ControllerDashboard() {
           {/* RC Toggle */}
           <button
             onClick={() => setIsRCOn(!isRCOn)}
-            className={`p-2 rounded-full transition-colors border ${isRCOn ? "bg-indigo-500/20 text-indigo-400 border-indigo-500/30" : "bg-slate-800 text-slate-500 border-transparent hover:text-slate-300"}`}
+            className={`p-2 rounded-full transition-colors border ${isRCOn ? "bg-indigo-500/20 text-indigo-400 border-indigo-500/30" : "bg-red-500 text-red-500 border-transparent hover:text-red-300"}`}
             title={isRCOn ? "RC Control: ON" : "RC Control: PAUSED"}
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -101,18 +119,17 @@ export default function ControllerDashboard() {
               <line x1="12" y1="2" x2="12" y2="12" />
             </svg>
           </button>
+          <StatusBadge
+            active={connection}
+            label={connection ? "WS CONNECTED" : "WS DISCONNECTED"}
+          />
 
           <StatusBadge
-            active={connection && !isVehicleOffline && health?.containerStatus === "RUNNING"}
-
+            active={!isVehicleOffline && health?.containerStatus === "RUNNING"}
             label={
-              !connection
-                ? "WS DISCONNECTED"
-                : isVehicleOffline
-                  ? "VEHICLE OFFLINE"
-                  : health?.containerStatus === "RUNNING"
-                    ? "CONNECTED"
-                    : "VEHICLE OFFLINE"
+              !isVehicleOffline && health?.containerStatus === "RUNNING"
+                ? "VEHICLE CONNECTED"
+                : "VEHICLE OFFLINE"
             }
           />
           <div className="h-6 w-[1px] bg-slate-700" />
