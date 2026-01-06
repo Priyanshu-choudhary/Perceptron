@@ -1,0 +1,44 @@
+name: Deploy Frontend to EC2
+
+on:
+  push:
+    branches: [ "master" ]
+    paths:
+      - "frontend-Remix/**"
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend-Remix/WebController/package-lock.json
+
+      - name: Install deps
+        working-directory: frontend-Remix/WebController
+        run: npm install
+
+      - name: Build frontend
+        working-directory: frontend-Remix/WebController
+        run: npm run build
+
+      - name: Deploy to EC2 (Amazon Linux)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user          # Amazon Linux default
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ${{ secrets.EC2_PATH }}
+            git pull origin master
+            cd frontend-Remix/WebController
+            npm install
+            npm run build
+            sudo systemctl restart frontend
