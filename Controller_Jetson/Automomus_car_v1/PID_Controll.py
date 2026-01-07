@@ -9,6 +9,17 @@ class PID:
         self._integral = 0
         self._last_time = time.time()
 
+    def set_tunings(self, kp, ki, kd):
+        """Changes the PID constants on the fly."""
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        # Optional: Some developers prefer to reset the integral when 
+        # constants change to avoid sudden spikes in output.
+        self.reset()
+        # print(f"UPDATED..{kp} {ki} {kd}")
+
+
     def compute(self, measurement):
         now = time.time()
         dt = now - self._last_time
@@ -43,6 +54,7 @@ class PID:
         
         self._prev_error = error
         self._last_time = now
+        # print(output)
         return output
 
     def reset(self):

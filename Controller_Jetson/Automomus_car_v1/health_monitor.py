@@ -23,6 +23,7 @@ class HealthMonitor:
         payload = {
             "latency": int(latency),
             "lastMessageTime": lastMessageTime,
+            "containerStatus": self.container_status,
         }
         try:
             session = await self._get_session()

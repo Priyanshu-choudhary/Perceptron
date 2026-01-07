@@ -24,6 +24,13 @@ RC_CHANNELS = {
     100: "timestamp"
 }
 
+CONFIG = {
+    # PID Tuning Channels (Sent via Smart addTVL as floats)
+    1: "Kp",
+    2: "Ki",
+    3: "Kd",
+}
+
 class RCDataDecoder:
     """
     Handles WebSocket connection and stores the latest decoded RC and Config data.
@@ -54,16 +61,16 @@ class RCDataDecoder:
                 if length == 4:
                     # Interpret 4-byte values in CONFIG as Float32
                     value = struct.unpack('<f', data)[0]
-                    ch_name = RC_CHANNELS.get(ch_id, f"PID_Param_{ch_id}")
+                    ch_name = CONFIG.get(ch_id, f"PID_Param_{ch_id}")
                     decoded_values[ch_name] = value
                 elif length == 2:
                     # Legacy or small integer config
                     value = struct.unpack('<H', data)[0]
-                    ch_name = RC_CHANNELS.get(ch_id, f"Config_{ch_id}")
+                    ch_name = CONFIG.get(ch_id, f"Config_{ch_id}")
                     decoded_values[ch_name] = value
 
             decoded_values["_type"] = "CONFIG"
-            print(decoded_values)
+            
             return decoded_values
 
         # --- HANDLE RC DATA (Driving & Timing) ---

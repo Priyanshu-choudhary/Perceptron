@@ -6,7 +6,7 @@ from serialSender import SerialSender
 from RCDataDecoder import RCDataDecoder
 from rc_mixer import RCMixer
 from health_monitor import HealthMonitor
-from control_process import PID
+from PID_Controll import PID
 
 # Configuration
 WS_URI = "ws://yadiec2.freedynamicdns.net:8080/ws"
@@ -67,25 +67,19 @@ async def main(shared_angle, shared_seq):
                     # Only update health monitor if we have valid latency data
                     health.update(int(latency), int(last_valid_packet_local_time * 1000))
             
-            # --- 2. HANDLE PID CONFIG UPDATES ---
-            # Check if this is a Config frame
+            
+            
+            #Read the decoded confid for PID contants
             if data.get("_type") == "CONFIG":
                 # IDs are mapped in RCDataDecoder.py RC_CHANNELS
-                if "Kp" in data: steering_pid.kp = data["Kp"]
-                if "Ki" in data: steering_pid.ki = data["Ki"]
-                if "Kd" in data: steering_pid.kd = data["Kd"]
-                # print(f"⚙️ PID Parameters Updated: P={steering_pid.kp}, I={steering_pid.ki}, D={steering_pid.kd}")
-                # We don't want to run motor logic on a pure config packet, 
-                # so we wait for the next RC packet.
-                continue 
-
+                steering_pid.set_tunings(kp=data["Kp"], ki=data["Ki"], kd=data["Kd"])
+                 
             # --- 3. MODE SELECTION & MOTOR CONTROL ---
             # This part only runs if it's NOT a config packet or after timing is updated
             aux1 = data.get("Aux1", 1000)
-   
+    
             # --- MODE SELECTION & EXECUTION ---
             # We check the local RC data to see if the user wants Manual or Auto
-            # Usually, we use a switch like Aux1
             
             aux1 = data.get("Aux1", 1000) if data else 1000
             # print(aux1)
@@ -97,6 +91,8 @@ async def main(shared_angle, shared_seq):
                 # --- AUTO (PID) MODE ---
                 # Read from shared memory updated by Vision Process
                 current_error = shared_angle.value
+
+                   
 
                 # Compute PID correction (Steering)
                 correction = steering_pid.compute(current_error)
