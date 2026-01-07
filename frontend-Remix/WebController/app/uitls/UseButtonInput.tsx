@@ -99,7 +99,7 @@ export default function useButtonInput() {
         speedRef.current = newSpeed;
 
         if (isAutoModeRef.current) {
-            throttleRef.current = 1500 + newSpeed;
+            throttleRef.current = 1500 - newSpeed;
             updateUiState();
         }
     };
