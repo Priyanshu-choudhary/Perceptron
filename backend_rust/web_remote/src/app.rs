@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use axum::extract::ws::Message;
 use tower_http::cors::{CorsLayer, Any};
-use http::Method;
+use axum::http::Method;
 
 use crate::{
     api,
