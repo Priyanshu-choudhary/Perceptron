@@ -4,6 +4,8 @@ use tracing::info;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use axum::extract::ws::Message;
+use tower_http::cors::{CorsLayer, Any};
+use http::Method;
 
 use crate::{
     api,
@@ -13,6 +15,17 @@ use crate::{
 
 pub async fn run() {
     // Global broadcast channel (Text + Binary)
+    let cors = CorsLayer::new()
+    .allow_origin(Any)            // allow all origins (DEV)
+    .allow_methods([
+        Method::GET,
+        Method::POST,
+        Method::PUT,
+        Method::DELETE,
+        Method::OPTIONS,
+    ])
+    .allow_headers(Any);
+
     let (tx, _) = broadcast::channel::<Message>(100);
     let tx = Arc::new(tx);
 
@@ -23,7 +36,8 @@ pub async fn run() {
     };
 
     let app = Router::new()
-        .merge(api::routes(state));
+        .merge(api::routes(state))
+        .layer(cors);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     info!("Listening on {}", addr);
@@ -32,4 +46,4 @@ pub async fn run() {
         .expect("Failed to bind port");
 
     axum::serve(listener, app).await.unwrap();
-}
+}   
