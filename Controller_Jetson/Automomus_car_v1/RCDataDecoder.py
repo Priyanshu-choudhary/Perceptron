@@ -106,7 +106,9 @@ class RCDataDecoder:
                     self.rx.reset()
                     
                     # Create Sender Task
-                    sender_task = asyncio.create_task(self.sender_loop(websocket))
+                    loop = asyncio.get_event_loop()
+                    sender_task = loop.create_task(self.sender_loop(websocket))
+
                     
                     try:
                         while True:
@@ -126,10 +128,10 @@ class RCDataDecoder:
                                     new_data["arrival_ts"] = arrival_ts
                                     self.latest_data = new_data
                                     
-            except (websockets.exceptions.ConnectionClosed, ConnectionRefusedError):
-                if 'sender_task' in locals(): sender_task.cancel()
-                print("⚠️ Connection lost. Retrying in 2s...")
-                await asyncio.sleep(2)
+                    except (websockets.exceptions.ConnectionClosed, ConnectionRefusedError):
+                        if 'sender_task' in locals(): sender_task.cancel()
+                        print("⚠️ Connection lost. Retrying in 2s...")
+                        await asyncio.sleep(2)
             except Exception as e:
                 if 'sender_task' in locals(): sender_task.cancel()
                 print(f"[ERROR] {e}")
@@ -143,6 +145,7 @@ class RCDataDecoder:
                 # Non-blocking check
                 if not q.empty():
                     msg = q.get_nowait()
+                    print(msg)
                     await websocket.send(msg)
                 else:
                     await asyncio.sleep(0.05) # Yield to avoid hogging CPU

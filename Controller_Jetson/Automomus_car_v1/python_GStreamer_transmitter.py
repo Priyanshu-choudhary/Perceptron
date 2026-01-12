@@ -34,7 +34,8 @@ stop_event = Event()
 shared_state = {
     "angle": 0.0,
     "center_points": [],
-    "vp_y": 0
+    "vp_y": 0,
+    "center":[]
 }
 
 state_lock = Lock()

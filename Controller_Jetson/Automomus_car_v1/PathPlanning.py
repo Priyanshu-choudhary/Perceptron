@@ -39,6 +39,7 @@ def path_planning_thread(frame_queue, shared_angle, shared_seq, stop_event, stat
 
         car_center_x = config.CAMERA_WIDTH // 2
         car_bottom_y = config.CAMERA_HEIGHT - 1
+        center = (car_center_x, car_bottom_y )
         vp_y = int(config.CAMERA_HEIGHT * 0.6)
 
         target_p = center_points[config.LOOK_AHEAD]
@@ -56,6 +57,7 @@ def path_planning_thread(frame_queue, shared_angle, shared_seq, stop_event, stat
             shared_state["angle"] = smoothed_angle
             shared_state["center_points"] = center_points
             shared_state["vp_y"] = vp_y
+            shared_state["center"] = center
 
 
 def overlay(frame, mask, state_lock, shared_state):
@@ -63,6 +65,7 @@ def overlay(frame, mask, state_lock, shared_state):
         angle = shared_state["angle"]
         center_points = shared_state["center_points"]
         vp_y = shared_state["vp_y"]
+        center= shared_state["center"]
 
     # ---- overlay mask ----
     color_mask = np.zeros_like(frame, dtype=np.uint8)
@@ -80,7 +83,7 @@ def overlay(frame, mask, state_lock, shared_state):
         cv2.circle(output, p, 4, (255, 0, 0), -1)
 
     if len(center_points) > config.LOOK_AHEAD:
-        cv2.line(output, center_points[0],
+        cv2.line(output, center,
                  center_points[config.LOOK_AHEAD], (0, 0, 0), 2)
 
     cv2.putText(
