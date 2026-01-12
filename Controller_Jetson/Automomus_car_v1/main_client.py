@@ -86,7 +86,7 @@ async def main(shared_angle, shared_seq, loop):
                     latency = (raw_diff - clock_offset) & 0xFFFFFFFF
                     last_valid_packet_local_time = now
                     last_processed_timestamp = packet_ts
-                    print(raw_diff , latency , last_valid_packet_local_time)
+                   
 
             # ------------------ CONFIG UPDATE ------------------
             if data.get("_type") == "CONFIG":

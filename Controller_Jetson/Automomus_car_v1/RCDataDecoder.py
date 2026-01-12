@@ -5,6 +5,8 @@ import struct
 import time
 from typing import Dict, Any
 from tinytlvx import TinyTLVRx, TTP_FRAME_TYPE_RC, TTP_FRAME_TYPE_CONFIG
+import TelemetryOutput
+import queue
 
 # =========================
 # CHANNEL DEFINITIONS
@@ -34,7 +36,7 @@ class RCDataDecoder:
         self.loop = loop
         self.rx = TinyTLVRx()
         self.latest_data = {}
-        self.loop = asyncio.get_event_loop()
+        self.loop = loop
 
     def get_latest_data(self) -> Dict[str, Any]:
         return self.latest_data
@@ -90,20 +92,27 @@ class RCDataDecoder:
     # =========================
     async def sender_loop(self, websocket):
         """
-        Periodically sends telemetry back to server.
-        Replace payload with your real telemetry.
+        Reads telemetry messages from TelemetryOutput queue
+        and sends them over the websocket.
         """
+        q = TelemetryOutput.get_queue()
+
         while True:
             try:
-                payload = {
-                    "heartbeat": True,
-                    "ts":  int(time.time() * 1000) & 0xFFFFFFFF
-                }
-                await websocket.send(struct.pack("<I", payload["ts"]))
-                await asyncio.sleep(0.1)
+                # queue.Queue is NOT async → use non-blocking get
+                try:
+                    msg = q.get_nowait()
+                except queue.Empty:
+                    await asyncio.sleep(0.02)
+                    continue
+
+                # Send telemetry (string or bytes)
+                await websocket.send(msg)
+
             except Exception as e:
                 print("[SENDER ERROR]", e)
                 return
+
 
     # =========================
     # MAIN RECEIVER LOOP
