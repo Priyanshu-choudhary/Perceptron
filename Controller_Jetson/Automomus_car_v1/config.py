@@ -63,7 +63,9 @@ FRAME_DURATION = int(1e9 / CAMERA_FPS)
 # AUTONOMOUS NAVIGATION
 # ===========================
 LOOK_AHEAD = 1  # Number of points to look ahead for steering
-EMA_ALPHA = 0.35 # Exponential Moving Average Filter (0.1 - 1.0) 1.0 = No Filter
+EMA_ALPHA = 0.7 # Exponential Moving Average Filter (0.1 - 1.0) 1.0 = No Filter
+EMA_ALPHA_ERROR = 0.7        # small → clean vision noise
+EMA_ALPHA_CORRECTION = 0.7   # smaller → smoother motors
 
 # ===========================
 # RC MIXER & MOTOR CONTROL

@@ -53,7 +53,12 @@ async def main(shared_angle, shared_seq, loop):
     last_valid_packet_local_time = time.time()
     clock_offset = None
     latency = 0
+    ema_error = 0.0
+    ema_error_initialized = False
 
+    ema_correction = 0.0
+    ema_correction_initialized = False
+ 
     print("🚀 Motor Control System Started. Waiting for data...")
 
     try:
@@ -104,18 +109,47 @@ async def main(shared_angle, shared_seq, loop):
                 # MANUAL
                 throttle = data.get("Pitch", 1500)
                 roll = data.get("Roll", 1500)
+                # print(data)
             else:
                 # AUTO
-                current_error = float(shared_angle.value)
-                correction = steering_pid.compute(current_error)
+                raw_error = float(shared_angle.value)
 
+                # -------- EMA on ERROR (input smoothing) --------
+                if not ema_error_initialized:
+                    ema_error = raw_error
+                    ema_error_initialized = True
+                else:
+                    ema_error = (
+                        config.EMA_ALPHA_ERROR * raw_error +
+                        (1.0 - config.EMA_ALPHA_ERROR) * ema_error
+                    )
+
+                filtered_error = ema_error
+
+                # -------- PID --------
+                raw_correction = steering_pid.compute(filtered_error)
+
+                # -------- EMA on CORRECTION (output smoothing) --------
+                if not ema_correction_initialized:
+                    ema_correction = raw_correction
+                    ema_correction_initialized = True
+                else:
+                    ema_correction = (
+                        config.EMA_ALPHA_CORRECTION * raw_correction +
+                        (1.0 - config.EMA_ALPHA_CORRECTION) * ema_correction
+                    )
+
+                correction = ema_correction
+
+                # -------- Actuation --------
                 throttle = data.get("Pitch", 1500)
                 roll = int(1500 + correction)
 
-                TelemetryOutput.send(
-                    f"{current_error},{correction},{throttle},{roll}",
-                    0.1
-                )
+
+                # build a output telemetry JSON
+                json_string = f'{{"error":{filtered_error},"correction":{ema_correction},"throttle":{throttle} }}'
+
+                TelemetryOutput.send(json_string, 0.2)
 
             # ------------------ SAFETY ------------------
             if (now - last_valid_packet_local_time) > 1.0:
