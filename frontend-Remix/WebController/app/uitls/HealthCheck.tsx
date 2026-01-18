@@ -10,6 +10,7 @@ export interface HealthData {
 }
 
 export function useHealth() {
+    const WS_ENDPOINT = import.meta.env.VITE_WS_ENDPOINT;
     const [health, setHealth] = useState<HealthData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -17,7 +18,7 @@ export function useHealth() {
     useEffect(() => {
         async function fetchHealth() {
             try {
-                const response = await fetch(`http://yadiec2.freedynamicdns.net:8080/health`);
+                const response = await fetch(`http://${WS_ENDPOINT}:8080/health`);
 
                 if (!response.ok) {
                     throw new Error(`Status: ${response.status}`);

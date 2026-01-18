@@ -114,6 +114,14 @@ export default function useButtonInput() {
         }
     };
 
+    // 5. External Control Setter (for Joystick)
+    const setJoystick = (throttle: number, roll: number) => {
+        throttleRef.current = throttle;
+        rollRef.current = roll;
+        // Force update for smooth visual feedback
+        updateUiState(true);
+    };
+
     useEffect(() => {
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
@@ -125,5 +133,5 @@ export default function useButtonInput() {
     }, [handleKeyDown, handleKeyUp]); // 3. Add dependencies here
 
     // 4. Return the data so your component can use it
-    return { uiState, speed, handleChange, mode };
+    return { uiState, speed, handleChange, mode, setJoystick };
 };

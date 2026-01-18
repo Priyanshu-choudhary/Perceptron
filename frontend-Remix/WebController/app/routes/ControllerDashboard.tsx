@@ -7,7 +7,8 @@ import { useHealth } from "~/uitls/HealthCheck";
 import LatencyGraph from "~/Components/LatencyGraph";
 import makeConfig_Packets from "~/uitls/makeConfig_Packets";
 // Imported Components
-import { Card, StatusBadge, MetricRow, ProgressBar, JoystickVisualizer, ModeBadge } from "~/Components/DashboardUI";
+import { Card, StatusBadge, MetricRow, ProgressBar, ModeBadge } from "~/Components/DashboardUI";
+import { Joystick } from "~/Components/Joystick";
 import WebTerminal from "~/Components/WebTerminal";
 import { CommandUplink, OutputLog } from "~/Components/CommandPanel";
 import ConfigDashboard from "~/Components/ConfigDashboard";
@@ -28,7 +29,8 @@ export default function ControllerDashboard() {
   /* eslint-disable react-hooks/exhaustive-deps */
   const { send, connection, reconnect, lastMessage } = useWebSocket(`ws://${WS_ENDPOINT}:8080/ws`);
   const [videoKey, setVideoKey] = useState(0);
-  const { uiState, speed, handleChange, mode } = useButtonInput();
+  const { uiState, speed, handleChange, mode, setJoystick } = useButtonInput();
+  const [isJoystickEnabled, setIsJoystickEnabled] = useState(false);
   const { health } = useHealth();
   const [logs, setLogs] = useState<{ time: string; msg: string; source: 'TX' | 'RX' }[]>([]);
   const [config, setConfig] = useState<ConfigState>({ P: 1.50, I: 0.3, D: 0.3 });
@@ -228,8 +230,22 @@ export default function ControllerDashboard() {
         {/* LEFT COLUMN: CONTROLS */}
         <div className="lg:col-span-3 space-y-6">
           <Card title="Input Visualizer">
-            <div className="py-4 px-8">
-              <JoystickVisualizer x={uiState.roll} y={uiState.throttle} />
+            <div className="py-4 px-8 relative">
+              <div className="absolute top-0 right-0 z-10">
+                <button
+                  onClick={() => setIsJoystickEnabled(!isJoystickEnabled)}
+                  className={`p-1.5 rounded-lg border transition-all ${isJoystickEnabled ? "bg-indigo-500 text-white border-indigo-500" : "bg-slate-800 text-slate-400 border-slate-700 hover:text-white"}`}
+                  title={isJoystickEnabled ? "Disable On-Screen Joystick" : "Enable On-Screen Joystick"}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></svg>
+                </button>
+              </div>
+              <Joystick
+                x={uiState.roll}
+                y={uiState.throttle}
+                isInteractive={isJoystickEnabled}
+                onMove={setJoystick}
+              />
             </div>
             <div className="mt-6 space-y-4">
               <ProgressBar label="Throttle (Pitch)" value={uiState.throttle} color="bg-blue-500" />
